@@ -1,10 +1,8 @@
-use std::{
-    io::{Read, Write},
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::state::State;
 
@@ -24,42 +22,51 @@ impl Service {
 }
 
 impl Service {
-    pub fn create(&self, body: String, auth: Option<(String, String)>) -> anyhow::Result<String> {
-        let mut state = self.state.lock();
-        let user = match auth {
-            None => None,
-            Some((username, password)) => Some(
-                state
-                    .auth_mut(username, password)
-                    .ok_or(anyhow!("Not authorized"))?,
-            ),
-        };
+    pub async fn create(
+        &self,
+        body: String,
+        auth: Option<(String, String)>,
+    ) -> anyhow::Result<String> {
+        if let Some((username, password)) = &auth {
+            self.state
+                .lock()
+                .auth(username, password)
+                .ok_or(anyhow!("Not authorized"))?;
+        }
         let id = uuid::Uuid::new_v4().to_string();
         let path = self.data_dir.join(&id);
-        let mut file = std::fs::File::create_new(path)?;
-        file.write_all(body.as_bytes())?;
+        let mut file = tokio::fs::File::create_new(path).await?;
+        file.write_all(body.as_bytes()).await?;
 
-        if let Some(user) = user {
-            user.paste_ids.push(id.clone());
-        }
+        match &auth {
+            None => {}
+            Some((username, password)) => {
+                self.state
+                    .lock()
+                    .auth_mut(username, password)
+                    .ok_or(anyhow!("Not authorized"))?
+                    .paste_ids
+                    .push(id.clone());
+            }
+        };
 
         Ok(id)
     }
 
     // TODO: stream the result instead of loading in memory
-    pub fn read(&self, id: &uuid::Uuid) -> anyhow::Result<String> {
+    pub async fn read(&self, id: &uuid::Uuid) -> anyhow::Result<String> {
         let path = self.data_dir.join(id.to_string());
-        let mut file = std::fs::File::open(path)?;
+        let mut file = tokio::fs::File::open(path).await?;
         let mut result = String::new();
-        file.read_to_string(&mut result)?;
+        file.read_to_string(&mut result).await?;
         Ok(result)
     }
 
     pub fn delete(
         &self,
         id_to_delete: uuid::Uuid,
-        username: String,
-        password: String,
+        username: &str,
+        password: &str,
     ) -> anyhow::Result<()> {
         let id_to_delete = id_to_delete.to_string();
         let mut state = self.state.lock();
@@ -81,12 +88,12 @@ impl Service {
         Ok(())
     }
 
-    pub fn register_user(&self, username: String, password: String) -> anyhow::Result<()> {
+    pub fn register_user(&self, username: &str, password: &str) -> anyhow::Result<()> {
         self.state.lock().create(username, password);
         Ok(())
     }
 
-    pub fn list(&self, username: String, password: String) -> anyhow::Result<Vec<String>> {
+    pub fn list(&self, username: &str, password: &str) -> anyhow::Result<Vec<String>> {
         let state = self.state.lock();
         let user = state
             .auth(username, password)

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    Extension, Router, debug_handler,
+    Extension, Router,
     extract::Path,
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -28,10 +28,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/paste/{id}", get(get_paste))
         .layer(Extension(Arc::new(service)));
 
-    let address = "0.0.0.0:3000";
+    let address: (&'static str, u16) = ("0.0.0.0", args.port);
     let listener = tokio::net::TcpListener::bind(address).await.unwrap();
     let fut = axum::serve(listener, app);
-    println!("Listening on {address}");
+    println!("Listening on {}:{}", address.0, address.1);
     fut.await.unwrap();
 
     Ok(())
@@ -41,13 +41,15 @@ async fn root() -> &'static str {
     "Hello!"
 }
 
-async fn get_paste(Path(paste_id): Path<Uuid>) -> String {
-    format!("Got GET /paste/{paste_id} request")
+async fn get_paste(Extension(service): Extension<Arc<Service>>, Path(id): Path<Uuid>) -> Response {
+    match service.read(&id).await {
+        Ok(text) => text.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
-#[debug_handler]
 async fn post_paste(Extension(service): Extension<Arc<Service>>, body: String) -> Response {
-    match service.create(body, None) {
+    match service.create(body, None).await {
         Ok(id) => id.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
