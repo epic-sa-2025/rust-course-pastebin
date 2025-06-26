@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 use axum::{
     Extension, Router,
+    body::Body,
     extract::Path,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use clap::Parser;
+use futures::TryStreamExt;
 use service::Service;
 use state::State;
 use uuid::Uuid;
@@ -43,13 +45,20 @@ async fn root() -> &'static str {
 
 async fn get_paste(Extension(service): Extension<Arc<Service>>, Path(id): Path<Uuid>) -> Response {
     match service.read(&id).await {
-        Ok(text) => text.into_response(),
+        Ok(reader) => {
+            let stream = tokio_util::io::ReaderStream::new(reader);
+            axum::body::Body::from_stream(stream).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-async fn post_paste(Extension(service): Extension<Arc<Service>>, body: String) -> Response {
-    match service.create(body, None).await {
+async fn post_paste(Extension(service): Extension<Arc<Service>>, body: Body) -> Response {
+    let reader =
+        tokio_util::io::StreamReader::new(body.into_data_stream().map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e.to_string())
+        }));
+    match service.create(reader, None).await {
         Ok(id) => id.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

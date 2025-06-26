@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncRead;
 
 use crate::state::State;
 
@@ -24,7 +24,7 @@ impl Service {
 impl Service {
     pub async fn create(
         &self,
-        body: String,
+        mut body: impl AsyncRead + Unpin,
         auth: Option<(String, String)>,
     ) -> anyhow::Result<String> {
         if let Some((username, password)) = &auth {
@@ -36,7 +36,7 @@ impl Service {
         let id = uuid::Uuid::new_v4().to_string();
         let path = self.data_dir.join(&id);
         let mut file = tokio::fs::File::create_new(path).await?;
-        file.write_all(body.as_bytes()).await?;
+        tokio::io::copy(&mut body, &mut file).await?;
 
         match &auth {
             None => {}
@@ -53,13 +53,10 @@ impl Service {
         Ok(id)
     }
 
-    // TODO: stream the result instead of loading in memory
-    pub async fn read(&self, id: &uuid::Uuid) -> anyhow::Result<String> {
+    pub async fn read(&self, id: &uuid::Uuid) -> anyhow::Result<tokio::fs::File> {
         let path = self.data_dir.join(id.to_string());
-        let mut file = tokio::fs::File::open(path).await?;
-        let mut result = String::new();
-        file.read_to_string(&mut result).await?;
-        Ok(result)
+        let file = tokio::fs::File::open(path).await?;
+        Ok(file)
     }
 
     pub fn delete(
