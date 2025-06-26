@@ -57,36 +57,36 @@ impl State {
         Ok(())
     }
 
-    pub fn create(&mut self, username: String, password: String) -> &User {
+    pub fn create(&mut self, username: &str, password: &str) -> &User {
         let salt = gen_salt();
-        let hash = hashed_password(password, &salt);
+        let hash = hashed_password(&password, &salt);
 
         self.users.insert(
-            username.clone(),
+            username.to_owned(),
             User {
-                username: username.clone(),
+                username: username.to_owned(),
                 password_hash: hash,
                 password_salt: salt,
                 paste_ids: Vec::new(),
             },
         );
-        self.users.get(&username).unwrap()
+        self.users.get(username).unwrap()
     }
 
-    pub fn auth(&self, username: String, password: String) -> Option<&User> {
-        let user = self.users.get(&username)?;
+    pub fn auth(&self, username: &str, password: &str) -> Option<&User> {
+        let user = self.users.get(username)?;
         let hash = hashed_password(password, &user.password_salt);
         (hash == user.password_hash).then_some(user)
     }
 
-    pub fn auth_mut(&mut self, username: String, password: String) -> Option<&mut User> {
-        let user = self.users.get_mut(&username)?;
+    pub fn auth_mut(&mut self, username: &str, password: &str) -> Option<&mut User> {
+        let user = self.users.get_mut(username)?;
         let hash = hashed_password(password, &user.password_salt);
         (hash == user.password_hash).then_some(user)
     }
 }
 
-fn hashed_password(password: String, salt: &str) -> Vec<u8> {
+fn hashed_password(password: &str, salt: &str) -> Vec<u8> {
     let mut digest = sha2::Sha256::new();
     digest
         .write_all(salt.as_bytes())
