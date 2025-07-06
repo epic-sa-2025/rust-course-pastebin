@@ -6,7 +6,7 @@ use axum::{
     extract::Path,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use clap::Parser;
 use futures::TryStreamExt;
@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(root))
         .route("/paste", post(post_paste))
-        .route("/paste/{id}", get(get_paste))
+        .route("/paste/{id}", get(get_paste).put(put_paste))
         .layer(Extension(Arc::new(service)));
 
     let address: (&'static str, u16) = ("0.0.0.0", args.port);
@@ -60,6 +60,22 @@ async fn post_paste(Extension(service): Extension<Arc<Service>>, body: Body) -> 
         }));
     match service.create(reader, None).await {
         Ok(id) => id.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn put_paste(
+    Extension(service): Extension<Arc<Service>>,
+    Path(id): Path<Uuid>,
+    body: Body,
+) -> Response {
+    let reader =
+        tokio_util::io::StreamReader::new(body.into_data_stream().map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::ConnectionAborted, e.to_string())
+        }));
+
+    match service.replace(&id, reader, None).await {
+        Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
