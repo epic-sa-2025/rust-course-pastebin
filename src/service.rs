@@ -59,6 +59,33 @@ impl Service {
         Ok(file)
     }
 
+    pub async fn replace(
+        &self,
+        id: &uuid::Uuid,
+        mut body: impl AsyncRead + Unpin,
+        auth: Option<(String, String)>,
+    ) -> anyhow::Result<()> {
+        if let Some((username, password)) = &auth {
+            let mut state = self.state.lock();
+            let user = state
+                .auth(username, password)
+                .ok_or(anyhow!("Not authorized"))?;
+
+            if !user.paste_ids.iter().any(|p| p == &id.to_string()) {
+                anyhow::bail!("Paste not found");
+            }
+        }
+
+        let path = self.data_dir.join(id.to_string());
+        if !path.exists() {
+            anyhow::bail!("Paste not found");
+        }
+        let mut file = tokio::fs::File::create(path).await?;
+        tokio::io::copy(&mut body, &mut file).await?;
+
+        Ok(())
+    }
+
     pub fn delete(
         &self,
         id_to_delete: uuid::Uuid,

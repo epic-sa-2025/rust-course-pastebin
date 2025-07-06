@@ -1,9 +1,9 @@
 use std::{collections::HashMap, io::Write, path::Path};
 
-use rand::distr::SampleString;
-use serde::{Deserialize, Serialize, Serializer, Deserializer};
-use sha2::Digest;
 use hex;
+use rand::distr::SampleString;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sha2::Digest;
 
 type Username = String;
 
