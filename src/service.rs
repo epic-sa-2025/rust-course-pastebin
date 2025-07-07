@@ -14,10 +14,13 @@ pub struct Service {
 impl Service {
     pub fn new(data_dir: PathBuf, state: State) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&data_dir)?;
-        Ok(Self {
+        let service = Self {
             data_dir,
             state: Mutex::new(state),
-        })
+        };
+        // Clean up dangling files and state entries on startup
+        service.cleanup_dangling_files()?;
+        Ok(service)
     }
 }
 
@@ -86,6 +89,34 @@ impl Service {
         Ok(())
     }
 
+    /// Cleans up files not referenced in state and removes state entries for missing files.
+    pub fn cleanup_dangling_files(&self) -> anyhow::Result<()> {
+        use std::fs;
+        use std::collections::HashSet;
+        let mut state = self.state.lock();
+        let mut all_paste_ids = HashSet::new();
+        for user in state.users_mut() {
+            // Remove paste_ids that do not exist on disk
+            user.paste_ids.retain(|id| {
+                let exists = self.data_dir.join(id).exists();
+                if exists {
+                    all_paste_ids.insert(id.clone());
+                }
+                exists
+            });
+        }
+        // Remove files not referenced in state
+        for entry in fs::read_dir(&self.data_dir)? {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if !all_paste_ids.contains(&file_name.to_string()) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+        Ok(())
+    }
+
     pub fn delete(
         &self,
         id_to_delete: uuid::Uuid,
@@ -106,9 +137,11 @@ impl Service {
             None => anyhow::bail!("Paste not found"),
             Some((i, _)) => i,
         };
-        std::fs::remove_file(self.data_dir.join(id_to_delete))?;
+        std::fs::remove_file(self.data_dir.join(&id_to_delete))?;
         user.paste_ids.remove(index);
-        // TODO: clean up dangling entries if state serialization failed
+        // Clean up any dangling files or state entries after delete
+        drop(state); // unlock before cleanup
+        self.cleanup_dangling_files()?;
         Ok(())
     }
 
