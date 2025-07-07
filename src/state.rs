@@ -84,6 +84,11 @@ impl State {
         let hash = hashed_password(password, &user.password_salt);
         (hash == user.password_hash).then_some(user)
     }
+
+    /// Returns a mutable iterator over all users (for cleanup purposes)
+    pub fn users_mut(&mut self) -> impl Iterator<Item = &mut User> {
+        self.users.values_mut()
+    }
 }
 
 fn hashed_password(password: &str, salt: &str) -> Vec<u8> {
